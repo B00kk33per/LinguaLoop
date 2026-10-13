@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using LinguaLoop.Domain;
 
 namespace LinguaLoop.Services;
@@ -147,15 +148,28 @@ public abstract class JsonPracticeCoach : IPracticeCoach
         "a small unexpected problem in everyday life"
     ];
 
-    private static readonly object ExerciseSchema = new
+    private static readonly object SentenceSchema = new
     {
         type = "object",
         properties = new
         {
+            requestToken = new { type = "string" },
             sourceText = new { type = "string" },
             referenceTranslation = new { type = "string" },
+            vocabularyMatchText = new { type = "string" }
+        },
+        required = new[] { "requestToken", "sourceText", "referenceTranslation", "vocabularyMatchText" },
+        additionalProperties = false
+    };
+
+    private static readonly object LexicalSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            requestToken = new { type = "string" },
+            vocabularyMatchEcho = new { type = "string" },
             literalTranslation = new { type = "string" },
-            vocabularyMatchText = new { type = "string" },
             synonyms = new { type = "array", items = new { type = "string" } },
             wordHints = new
             {
@@ -173,9 +187,39 @@ public abstract class JsonPracticeCoach : IPracticeCoach
                 }
             }
         },
-        required = new[] { "sourceText", "referenceTranslation", "literalTranslation", "vocabularyMatchText", "synonyms", "wordHints" },
+        required = new[] { "requestToken", "vocabularyMatchEcho", "literalTranslation", "synonyms", "wordHints" },
         additionalProperties = false
     };
+
+    private static readonly object WordHintsSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            requestToken = new { type = "string" },
+            vocabularyMatchEcho = new { type = "string" },
+            wordHints = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        sourceText = new { type = "string" },
+                        synonyms = new { type = "array", items = new { type = "string" } }
+                    },
+                    required = new[] { "sourceText", "synonyms" },
+                    additionalProperties = false
+                }
+            }
+        },
+        required = new[] { "requestToken", "vocabularyMatchEcho", "wordHints" },
+        additionalProperties = false
+    };
+
+    private sealed record SentenceData(string SourceText, string ReferenceTranslation, string VocabularyMatchText);
+    private sealed record LexicalData(string LiteralTranslation, IReadOnlyList<string> Synonyms, IReadOnlyList<WordHint> WordHints);
 
     private static readonly object GradeSchema = new
     {
@@ -183,13 +227,11 @@ public abstract class JsonPracticeCoach : IPracticeCoach
         properties = new
         {
             requestToken = new { type = "string" },
-            sourceEcho = new { type = "string" },
-            referenceTranslationEcho = new { type = "string" },
             isCorrect = new { type = "boolean" },
             feedback = new { type = "string" },
             idealAnswer = new { type = "string" }
         },
-        required = new[] { "requestToken", "sourceEcho", "referenceTranslationEcho", "isCorrect", "feedback", "idealAnswer" },
+        required = new[] { "requestToken", "isCorrect", "feedback", "idealAnswer" },
         additionalProperties = false
     };
 
@@ -202,42 +244,218 @@ public abstract class JsonPracticeCoach : IPracticeCoach
             : "English";
         var hasUsableTranslation = !string.IsNullOrWhiteSpace(card.Translation) &&
             !string.Equals(card.Prompt.Trim(), card.Translation.Trim(), StringComparison.OrdinalIgnoreCase);
-        var knownTranslation = hasUsableTranslation ? card.Translation : "Not supplied";
+        var cachedLiteralTranslation = hasUsableTranslation ? card.Translation!.Trim() : null;
+        var cachedSynonyms = card.Synonyms
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToArray();
         var exampleContext = ExampleContexts[Random.Shared.Next(ExampleContexts.Length)];
         var previousExamples = recentExamples.Count == 0
             ? "None yet."
             : string.Join("\n", recentExamples.Select(example => $"- {example}"));
-        var prompt = $$"""
-            Create exactly one concise, natural {{sourceLanguage}} sentence for an English-Ukrainian learner.
-            The learner's vocabulary card is {{card.PromptLanguage}}: "{{card.Prompt}}".
-            Its known translation is: "{{knownTranslation}}".
-            Use this creative context as a constraint: {{exampleContext}}.
-            Do not repeat or closely paraphrase any of these recent examples for this card:
-            {{previousExamples}}
 
-            The sentence must demonstrate the card's meaning naturally and include concrete details that fit the context. Avoid a generic textbook sentence or a stock example you have already used. It may use an appropriate grammatical form rather than reproducing the card literally. Do not add a title, hint, explanation, quotation marks, or a second sentence.
-            Return sourceText in {{sourceLanguage}} and referenceTranslation as a natural {{targetLanguage}} translation of that exact sentence.
-            Return literalTranslation as a direct {{literalTargetLanguage}} translation of the vocabulary card itself, not of the example sentence. Always provide it, even when the known translation was not supplied.
-            Return vocabularyMatchText as the exact contiguous phrase from sourceText that best expresses the vocabulary card's meaning. Preserve its spelling and inflection exactly as it appears in sourceText.
-            Return synonyms as up to three natural equivalents of the vocabulary card in {{literalTargetLanguage}}. Do not include the literalTranslation itself.
-            Return one wordHints item for each distinct word in vocabularyMatchText. Each sourceText must exactly match that word as it appears in sourceText. Give up to three concise synonyms or equivalent meanings for that individual word in {{targetLanguage}}, independent of the vocabulary phrase meaning. For example, for "pitch black", the word "pitch" should have its own word-level equivalents such as "???????" or "?????", not an explanation of the whole idiom such as "utterly/completely". Include every word from the matched phrase; do not return duplicate words. Use an empty array only if no component can be matched.
-            """;
-
-        var output = await GenerateJsonAsync(prompt, ExerciseSchema, 0.9);
-        using var document = ParseObject(output);
-        var root = document.RootElement;
-        var sourceText = RequiredString(root, "sourceText", "source_text", "sentence", "sourceSentence");
-        var referenceTranslation = RequiredString(root, "referenceTranslation", "reference_translation", "translation", "targetText");
-        var wordHints = ReadWordHints(root);
-        return new PracticeExercise(
-            sourceText,
+        var sentence = await GenerateSentenceAsync(
+            card,
             sourceLanguage,
             targetLanguage,
-            referenceTranslation,
-            RequiredString(root, "literalTranslation", "literal_translation", "cardTranslation", "card_translation"),
-            wordHints,
-            RequiredString(root, "vocabularyMatchText", "vocabulary_match_text", "matchedPhrase", "matched_phrase"),
-            ReadStringArray(root, "synonyms", "alternatives"));
+            cachedLiteralTranslation,
+            exampleContext,
+            previousExamples);
+        var lexical = await GenerateLexicalDataAsync(
+            card,
+            sentence,
+            sourceLanguage,
+            targetLanguage,
+            literalTargetLanguage,
+            cachedLiteralTranslation,
+            cachedSynonyms);
+
+        return new PracticeExercise(
+            sentence.SourceText,
+            sourceLanguage,
+            targetLanguage,
+            sentence.ReferenceTranslation,
+            lexical.LiteralTranslation,
+            lexical.WordHints,
+            sentence.VocabularyMatchText,
+            lexical.Synonyms);
+    }
+
+    private async Task<SentenceData> GenerateSentenceAsync(
+        Card card,
+        string sourceLanguage,
+        string targetLanguage,
+        string? knownTranslation,
+        string exampleContext,
+        string previousExamples)
+    {
+        const int maxAttempts = 3;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var requestToken = Guid.NewGuid().ToString("N");
+            var prompt = $$"""
+                Create exactly one concise, natural {{sourceLanguage}} sentence for an English-Ukrainian learner.
+                Request token: {{requestToken}}
+                Vocabulary card: {{card.PromptLanguage}} "{{card.Prompt}}".
+                Known card translation: "{{knownTranslation ?? "Not supplied"}}".
+                Creative context: {{exampleContext}}.
+                Do not repeat or closely paraphrase these recent examples:
+                {{previousExamples}}
+
+                The sentence must demonstrate the card's meaning naturally and contain concrete details. It may use an appropriate grammatical form instead of reproducing the card literally. Return one sentence only, without a title, explanation, quotation marks, or hints.
+                Return sourceText in {{sourceLanguage}}.
+                Return referenceTranslation as a natural {{targetLanguage}} translation of that exact sentence.
+                Return vocabularyMatchText as the exact contiguous text in sourceText that expresses the card's meaning. Preserve spelling, casing, and inflection exactly.
+                Echo requestToken exactly. Never reuse output from an earlier request.
+                """;
+
+            try
+            {
+                var output = await GenerateJsonAsync(prompt, SentenceSchema, 0.85);
+                using var document = ParseObject(output);
+                var root = document.RootElement;
+                if (!string.Equals(RequiredString(root, "requestToken"), requestToken, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Sentence response token did not match the current request.");
+
+                var sourceText = RequiredString(root, "sourceText", "source_text", "sentence", "sourceSentence").Trim();
+                var referenceTranslation = RequiredString(root, "referenceTranslation", "reference_translation", "translation", "targetText").Trim();
+                var vocabularyMatchText = RequiredString(root, "vocabularyMatchText", "vocabulary_match_text", "matchedPhrase", "matched_phrase").Trim();
+                if (sourceText.Length > 320)
+                    throw new InvalidOperationException("Generated sentence was too long.");
+                if (!sourceText.Contains(vocabularyMatchText, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Vocabulary match was not exact text from the generated sentence.");
+                if (string.Equals(sourceText, referenceTranslation, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Generated sentence and translation were identical.");
+
+                return new SentenceData(sourceText, referenceTranslation, vocabularyMatchText);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                lastError = exception;
+                if (attempt < maxAttempts)
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+            }
+        }
+
+        throw new InvalidOperationException("The AI coach could not generate a valid example sentence after several attempts.", lastError);
+    }
+
+    private async Task<LexicalData> GenerateLexicalDataAsync(
+        Card card,
+        SentenceData sentence,
+        string sourceLanguage,
+        string targetLanguage,
+        string literalTargetLanguage,
+        string? cachedLiteralTranslation,
+        IReadOnlyList<string> cachedSynonyms)
+    {
+        var expectedWords = GetDistinctWords(sentence.VocabularyMatchText);
+        var needsCardMetadata = string.IsNullOrWhiteSpace(cachedLiteralTranslation) || cachedSynonyms.Count == 0;
+        if (!needsCardMetadata &&
+            expectedWords.Count == 1 &&
+            string.Equals(sourceLanguage, card.PromptLanguage, StringComparison.OrdinalIgnoreCase))
+        {
+            return new LexicalData(
+                cachedLiteralTranslation!,
+                cachedSynonyms,
+                [new WordHint(expectedWords[0], cachedSynonyms)]);
+        }
+
+        const int maxAttempts = 3;
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var requestToken = Guid.NewGuid().ToString("N");
+            var metadataInstructions = needsCardMetadata
+                ? $$"""
+                    Return literalTranslation as a direct {{literalTargetLanguage}} translation of the vocabulary card itself, not of the example sentence.
+                    Return synonyms as up to three natural {{literalTargetLanguage}} equivalents of the whole vocabulary card. Do not repeat literalTranslation.
+                    """
+                : "The card's literal translation and whole-phrase synonyms are already cached; do not return or reconsider them.";
+            var prompt = $$"""
+                Analyze this fixed vocabulary exercise. Do not rewrite its sentence or matched phrase.
+                Request token: {{requestToken}}
+                Vocabulary card: {{card.PromptLanguage}} "{{card.Prompt}}".
+                Known card translation: "{{cachedLiteralTranslation ?? "Not supplied"}}".
+                Fixed {{sourceLanguage}} sentence: "{{sentence.SourceText}}"
+                Exact vocabularyMatchText: "{{sentence.VocabularyMatchText}}"
+
+                {{metadataInstructions}}
+                Return one wordHints item for every distinct word in vocabularyMatchText. Each sourceText must be the exact word as written in vocabularyMatchText. Give up to three concise {{targetLanguage}} dictionary meanings or equivalents for that individual word, independently of the whole phrase. For "pitch black", for example, meanings for "pitch" may include "асфальт" or "смола"; do not describe "pitch" merely as "utterly" or "completely". Do not omit words or return duplicates.
+                Echo requestToken and vocabularyMatchText exactly. Never reuse output from an earlier request.
+                """;
+
+            try
+            {
+                var output = await GenerateJsonAsync(prompt, needsCardMetadata ? LexicalSchema : WordHintsSchema, 0.15);
+                using var document = ParseObject(output);
+                var root = document.RootElement;
+                if (!string.Equals(RequiredString(root, "requestToken"), requestToken, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Lexical response token did not match the current request.");
+                if (!string.Equals(RequiredString(root, "vocabularyMatchEcho"), sentence.VocabularyMatchText, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Lexical response did not match the current vocabulary phrase.");
+
+                var wordHints = ReadWordHints(root);
+                ValidateWordHints(expectedWords, wordHints);
+                var literalTranslation = cachedLiteralTranslation ?? RequiredString(
+                    root,
+                    "literalTranslation",
+                    "literal_translation",
+                    "cardTranslation",
+                    "card_translation").Trim();
+                var synonyms = cachedSynonyms.Count > 0
+                    ? cachedSynonyms
+                    : ReadStringArray(root, "synonyms", "alternatives")
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => value.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(3)
+                        .ToArray();
+                if (synonyms.Count == 0)
+                    throw new InvalidOperationException("Lexical response did not contain whole-card synonyms.");
+
+                return new LexicalData(literalTranslation, synonyms, wordHints);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                lastError = exception;
+                if (attempt < maxAttempts)
+                    await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+            }
+        }
+
+        throw new InvalidOperationException("The AI coach could not generate valid lexical hints after several attempts.", lastError);
+    }
+
+    private static IReadOnlyList<string> GetDistinctWords(string phrase)
+    {
+        var words = new List<string>();
+        foreach (Match match in Regex.Matches(phrase, @"[\p{L}\p{M}'’\-]+"))
+        {
+            if (!words.Contains(match.Value, StringComparer.OrdinalIgnoreCase))
+                words.Add(match.Value);
+        }
+
+        if (words.Count == 0)
+            throw new InvalidOperationException("The matched vocabulary phrase did not contain any words.");
+        return words;
+    }
+
+    private static void ValidateWordHints(IReadOnlyList<string> expectedWords, IReadOnlyList<WordHint> wordHints)
+    {
+        foreach (var expectedWord in expectedWords)
+        {
+            var matches = wordHints.Where(hint => string.Equals(hint.SourceText.Trim(), expectedWord, StringComparison.Ordinal)).ToArray();
+            if (matches.Length != 1 || matches[0].Synonyms.Count == 0)
+                throw new InvalidOperationException($"Lexical response did not provide one usable hint for '{expectedWord}'.");
+        }
+
+        if (wordHints.Any(hint => !expectedWords.Contains(hint.SourceText.Trim(), StringComparer.Ordinal)))
+            throw new InvalidOperationException("Lexical response contained a word outside the matched vocabulary phrase.");
     }
 
     public async Task<GradingResult> GradeAsync(PracticeExercise exercise, string answer)
@@ -262,22 +480,17 @@ public abstract class JsonPracticeCoach : IPracticeCoach
                 Learner answer JSON: {{answerJson}}
 
                 The learning objective is the vocabulary phrase, not the whole example sentence. Decide isCorrect based only on whether the learner conveys the meaning of the exact vocabulary phrase in this context in {{exercise.TargetLanguage}}, allowing natural equivalents and grammar variations. The learner may translate just the vocabulary phrase; do not require the rest of the example sentence. Missing subjects, actions, details, punctuation, or grammar outside that phrase must never turn an otherwise correct phrase translation into a wrong answer. Mark false only when the phrase is missing, materially mistranslated, used with the wrong sense, or the answer clearly does not attempt its meaning. Use the source sentence and full reference translation only to infer the phrase's contextual meaning. Do not introduce details or scenes absent from the source. Give brief constructive feedback in {{exercise.TargetLanguage}}; you may mention optional improvements separately, but they must not affect isCorrect. Provide a natural idealAnswer for the full example sentence.
-                In requestToken, copy the request token exactly. In sourceEcho and referenceTranslationEcho, copy the corresponding input string exactly, without quotation marks. Never reuse feedback, a source sentence, or a reference translation from an earlier request.
+                In requestToken, copy the request token exactly. Never reuse feedback from an earlier request.
                 """;
 
             var output = await GenerateJsonAsync(prompt, GradeSchema, 0);
             using var document = ParseObject(output);
             var root = document.RootElement;
             var responseMatchesRequest =
-                string.Equals(RequiredString(root, "requestToken"), requestToken, StringComparison.Ordinal) &&
-                string.Equals(RequiredString(root, "sourceEcho"), exercise.SourceText, StringComparison.Ordinal) &&
-                string.Equals(RequiredString(root, "referenceTranslationEcho"), exercise.ReferenceTranslation, StringComparison.Ordinal);
+                string.Equals(RequiredString(root, "requestToken"), requestToken, StringComparison.Ordinal);
             var idealAnswer = RequiredString(root, "idealAnswer", "ideal_answer", "referenceTranslation", "reference_translation");
-            var sourceWordCount = exercise.SourceText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
-            var idealAnswerWordCount = idealAnswer.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
-            var answerLengthIsPlausible = idealAnswerWordCount <= Math.Max(8, sourceWordCount * 3);
 
-            if (!responseMatchesRequest || !answerLengthIsPlausible)
+            if (!responseMatchesRequest)
             {
                 if (attempt < maxAttempts - 1)
                 {

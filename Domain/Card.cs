@@ -5,6 +5,7 @@ public sealed class Card
     public long Id { get; init; }
     public required string Prompt { get; init; }
     public string? Translation { get; init; }
+    public IReadOnlyList<string> Synonyms { get; init; } = [];
     public required string PromptLanguage { get; init; }
     public DateTime NextReviewAt { get; init; }
     public int IntervalDays { get; init; }

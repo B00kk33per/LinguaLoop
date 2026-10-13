@@ -25,6 +25,7 @@ public partial class MainWindow : Window, IWindowCommandContext
     private bool _useReverseDirection;
     private string _displayPromptText = string.Empty;
     private Card? _selectedVocabularyCard;
+    private Task? _initializationTask;
 
     public MainWindow()
     {
@@ -48,14 +49,26 @@ public partial class MainWindow : Window, IWindowCommandContext
         _logger.Info("Main window initialized; application commands attached.");
         Opened += async (_, _) =>
         {
-            _logger.Info("Main window opened; initializing application state.");
+            var startsInitialization = _initializationTask is null;
+            if (startsInitialization)
+            {
+                _logger.Info("Main window opened; initializing application state.");
+                _initializationTask = InitializeAsync();
+            }
+            else
+            {
+                _logger.Info("Main window reopened; reusing initialized application state.");
+            }
+
             try
             {
-                await InitializeAsync();
-                _logger.Info("Application state initialized.");
+                await _initializationTask!;
+                if (startsInitialization)
+                    _logger.Info("Application state initialized.");
             }
             catch (Exception exception)
             {
+                _initializationTask = null;
                 _logger.Error("Application initialization failed", exception);
                 PracticeStatus.Text = "LinguaLoop could not initialize. See the local app log for details.";
             }
@@ -147,9 +160,16 @@ public partial class MainWindow : Window, IWindowCommandContext
     private async Task EnsurePracticeCardAsync()
     {
         if (_currentCard is null)
+        {
             await LoadNextCardAsync();
-    }
+            return;
+        }
 
+        // A card may have been selected by a previous operation without an AI
+        // exercise being ready yet. Finish that work before exposing the card.
+        if (_aiCoach is not null && _currentExercise is null && string.IsNullOrWhiteSpace(_aiLoadError))
+            await LoadCardAsync(_currentCard);
+    }
     private void PracticeReminder_ActionSelected(object? sender, PracticeReminderAction action)
     {
         Dispatcher.UIThread.Post(async () =>
@@ -222,8 +242,10 @@ public partial class MainWindow : Window, IWindowCommandContext
                 var recentExamples = await _repository.GetRecentExamplesAsync(_currentCard.Id);
                 _currentExercise = await _aiCoach.CreateExerciseAsync(_currentCard, recentExamples);
                 await _repository.SaveGeneratedExampleAsync(_currentCard.Id, _currentExercise.SourceText);
-                if (NeedsLiteralTranslation(_currentCard))
-                    await _repository.SaveLiteralTranslationAsync(_currentCard, _currentExercise.LiteralTranslation);
+                await _repository.SaveLexicalMetadataAsync(
+                    _currentCard,
+                    _currentExercise.LiteralTranslation,
+                    _currentExercise.Synonyms);
                 UpdateExerciseDisplay();
                 AnswerBox.Focus();
                 return;
@@ -358,10 +380,6 @@ public partial class MainWindow : Window, IWindowCommandContext
         }
     }
 
-    private static bool NeedsLiteralTranslation(Card card) =>
-        string.IsNullOrWhiteSpace(card.Translation) ||
-        string.Equals(card.Prompt.Trim(), card.Translation.Trim(), StringComparison.OrdinalIgnoreCase);
-
     private void SetBusy(bool isBusy, string? message = null)
     {
         BusyOverlay.IsVisible = isBusy;
@@ -444,10 +462,8 @@ public partial class MainWindow : Window, IWindowCommandContext
     {
         try
         {
-            _logger.Info("Practice timer tick received.");
-
-            if (_currentCard is null)
-                await LoadNextCardAsync();
+            _logger.Info("Practice timer tick received; preparing the exercise before showing a notification.");
+            await EnsurePracticeCardAsync();
 
             if (_currentCard is null)
             {
@@ -459,10 +475,9 @@ public partial class MainWindow : Window, IWindowCommandContext
         }
         catch (Exception exception)
         {
-            _logger.Error("Scheduled practice timer failed", exception);
+            _logger.Error("Scheduled practice preparation failed", exception);
         }
     }
-
     private void NormalizeSettings()
     {
         if (!string.Equals(_settings.Provider, AppSettings.GeminiProvider, StringComparison.OrdinalIgnoreCase))
