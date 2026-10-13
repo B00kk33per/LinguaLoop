@@ -1,0 +1,18 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio and user-specific settings
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local application data, logs, and secrets
+*.db
+*.db-shm
+*.db-wal
+*.log
+appsettings.Local.json
+secrets.json

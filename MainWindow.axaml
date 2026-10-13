@@ -1,0 +1,123 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        x:Class="LinguaLoop.MainWindow"
+        Width="760" Height="740" CanResize="False"
+        Title="LinguaLoop">
+  <Grid>
+    <Grid RowDefinitions="Auto,*" Margin="20">
+      <StackPanel Spacing="4" Margin="0,0,0,16">
+        <TextBlock Text="LinguaLoop" FontSize="28" FontWeight="SemiBold" />
+        <TextBlock Text="A quiet, adaptive practice loop for English and Ukrainian." Opacity="0.7" />
+      </StackPanel>
+      <TabControl Grid.Row="1" x:Name="MainTabs">
+        <TabItem Header="Practice">
+          <Grid Margin="8" RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <TextBlock x:Name="PracticeStatus" Text="Loading your next review…" Opacity="0.7" VerticalAlignment="Center" />
+              <ToggleSwitch x:Name="DirectionSwitch" Grid.Column="1" Content="Reverse direction" ToolTip.Tip="Answer in the opposite translation direction. This is tracked separately and has less effect on your main learning score." IsChecked="False" />
+            </Grid>
+            <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="4">
+              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                <Button x:Name="CopySentenceButton" Content="Copy sentence" ToolTip.Tip="Copy the complete example so you can paste it into your vocabulary." />
+                <Button x:Name="HintButton" Content="Hint" />
+              </StackPanel>
+              <Border Grid.Row="1" Padding="18" CornerRadius="10" Background="#F1F3F5" BorderBrush="#D9DEE5" BorderThickness="1">
+                <WrapPanel x:Name="QuizPrompt" />
+              </Border>
+            </Grid>
+            <Border Grid.Row="2" x:Name="HintPanel" IsVisible="False" Padding="10" CornerRadius="6" Background="#16000000">
+              <StackPanel Spacing="3">
+                <TextBlock Text="Vocabulary" FontWeight="SemiBold" />
+                <TextBlock x:Name="HintVocabularyText" TextWrapping="Wrap" />
+                <TextBlock Text="Literal translation" FontWeight="SemiBold" />
+                <TextBlock x:Name="HintLiteralText" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <StackPanel Grid.Row="3" Spacing="8">
+            <TextBlock Text="Your translation" />
+            <TextBox x:Name="AnswerBox" PlaceholderText="Type your answer, in either language…" AcceptsReturn="True" MinHeight="72" TextWrapping="Wrap" />
+            <ScrollViewer Height="120"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <TextBlock x:Name="FeedbackBox" TextWrapping="Wrap" />
+            </ScrollViewer>
+            </StackPanel>
+            <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+              <Button x:Name="DoneButton" Content="Done" />
+              <Button x:Name="NextButton" Content="Next" />
+              <Button x:Name="CheckAnswerButton" Content="Check answer" IsDefault="True" />
+            </StackPanel>
+          </Grid>
+        </TabItem>
+      <TabItem Header="Vocabulary">
+        <Grid Margin="8" ColumnDefinitions="2*,3*" ColumnSpacing="24">
+          <StackPanel Spacing="10">
+            <TextBlock Text="Add an item" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="Prompt" />
+            <TextBox x:Name="NewPrompt" PlaceholderText="Word or sentence" AcceptsReturn="True" TextWrapping="Wrap" />
+            <TextBlock Text="Expected translation (optional)" />
+            <TextBox x:Name="NewTranslation" PlaceholderText="Leave blank for AI-guided practice" AcceptsReturn="True" TextWrapping="Wrap" />
+            <TextBlock Text="Prompt language" />
+            <ComboBox x:Name="PromptLanguage" SelectedIndex="0">
+              <ComboBoxItem Content="English" />
+              <ComboBoxItem Content="Ukrainian" />
+            </ComboBox>
+            <TextBlock Text="Select an item in the list to edit or remove it." TextWrapping="Wrap" Opacity="0.7" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="AddVocabularyButton" Content="Add to vocabulary" />
+              <Button x:Name="SaveVocabularyButton" Content="Save changes" IsEnabled="False" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="RemoveVocabularyButton" Content="Remove selected" IsEnabled="False" />
+              <Button x:Name="CancelVocabularyEditButton" Content="Cancel edit" IsEnabled="False" />
+            </StackPanel>
+            <TextBlock x:Name="AddStatus" TextWrapping="Wrap" Opacity="0.8" />
+          </StackPanel>
+          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="10">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Your vocabulary" FontSize="20" FontWeight="SemiBold" />
+              <Button x:Name="RefreshVocabularyButton" Content="Refresh" />
+            </StackPanel>
+            <ListBox Grid.Row="1" x:Name="VocabularyList" SelectionChanged="VocabularyList_SelectionChanged" />
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Progress">
+        <StackPanel Margin="8" Spacing="12">
+          <TextBlock Text="Your progress" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock x:Name="StatsBox" FontSize="16" TextWrapping="Wrap" />
+          <Button x:Name="RefreshStatisticsButton" Content="Refresh statistics" HorizontalAlignment="Left" />
+        </StackPanel>
+      </TabItem>
+      <TabItem Header="Settings">
+        <StackPanel Margin="8" Spacing="10" MaxWidth="470">
+          <TextBlock Text="AI practice coach" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock Text="Cloudflare Workers AI is the default: it runs Gemma 4 from Cloudflare's daily free allowance. Gemini is ready as an alternative provider if needed. Credentials are encrypted for this Windows account before they are saved locally." TextWrapping="Wrap" Opacity="0.75" />
+          <TextBlock Text="Provider" />
+          <ComboBox x:Name="ProviderBox" SelectedIndex="0" SelectionChanged="ProviderBox_SelectionChanged">
+            <ComboBoxItem Content="Cloudflare Workers AI (Gemma 4)" />
+            <ComboBoxItem Content="Google Gemini API" />
+          </ComboBox>
+          <TextBlock Text="Cloudflare Account ID (Cloudflare only)" />
+          <TextBox x:Name="CloudflareAccountIdBox" PlaceholderText="Cloudflare Account ID" />
+          <TextBlock Text="Provider credential" />
+          <TextBox x:Name="ProviderTokenBox" PasswordChar="●" PlaceholderText="Workers AI API token or Gemini API key" />
+          <TextBlock Text="Model" />
+          <TextBox x:Name="ModelBox" Text="@cf/google/gemma-4-26b-a4b-it" />
+          <TextBlock Text="Minutes between prompts" />
+          <NumericUpDown x:Name="IntervalBox" Minimum="5" Maximum="240" Value="30" />
+          <Button x:Name="SaveSettingsButton" Content="Save settings" HorizontalAlignment="Left" />
+          <TextBlock x:Name="SettingsStatus" TextWrapping="Wrap" Opacity="0.8" />
+        </StackPanel>
+      </TabItem>
+      </TabControl>
+    </Grid>
+    <Border x:Name="BusyOverlay" IsVisible="False" Background="#88000000" ZIndex="100">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="280" Spacing="12">
+        <ProgressBar IsIndeterminate="True" />
+        <TextBlock x:Name="BusyMessage" Foreground="White" FontSize="18" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
