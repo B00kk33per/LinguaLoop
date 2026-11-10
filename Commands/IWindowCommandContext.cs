@@ -12,6 +12,7 @@ public interface IWindowCommandContext
     SettingsStore SettingsStore { get; }
     AppSettings Settings { get; }
     Card? CurrentCard { get; set; }
+    bool IsCurrentCardReviewed { get; set; }
     PracticeExercise? CurrentExercise { get; set; }
     IPracticeCoach? Coach { get; set; }
     string? AiLoadError { get; }

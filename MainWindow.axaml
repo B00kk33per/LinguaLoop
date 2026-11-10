@@ -18,10 +18,13 @@
               <ToggleSwitch x:Name="DirectionSwitch" Grid.Column="1" Content="Reverse direction" ToolTip.Tip="Answer in the opposite translation direction. This is tracked separately and has less effect on your main learning score." IsChecked="False" />
             </Grid>
             <Grid Grid.Row="1" RowDefinitions="Auto,*" RowSpacing="4">
-              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                <Button x:Name="CopySentenceButton" Content="Copy sentence" ToolTip.Tip="Copy the complete example so you can paste it into your vocabulary." />
-                <Button x:Name="HintButton" Content="Hint" />
-              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                <Button x:Name="NewExampleButton" Content="New example" HorizontalAlignment="Left" IsEnabled="False" ToolTip.Tip="Generate a different sentence for this vocabulary item." />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                  <Button x:Name="CopySentenceButton" Content="Copy sentence" ToolTip.Tip="Copy the complete example so you can paste it into your vocabulary." />
+                  <Button x:Name="HintButton" Content="Hint" />
+                </StackPanel>
+              </Grid>
               <Border Grid.Row="1" Padding="18" CornerRadius="10" Background="#F1F3F5" BorderBrush="#D9DEE5" BorderThickness="1">
                 <WrapPanel x:Name="QuizPrompt" />
               </Border>

@@ -244,6 +244,16 @@ public sealed class VocabularyRepository
         return await reader.ReadAsync() ? ReadCard(reader) : null;
     }
 
+    public async Task<Card?> GetCardByIdAsync(long cardId)
+    {
+        await using var connection = await OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json, semantic_profile_json FROM cards WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", cardId);
+        await using var reader = await command.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? ReadCard(reader) : null;
+    }
+
     public async Task<IReadOnlyList<Card>> GetCardsAsync()
     {
         var cards = new List<Card>();

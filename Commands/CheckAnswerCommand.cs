@@ -22,19 +22,21 @@ public sealed class CheckAnswerCommand(IWindowCommandContext context, AppLogger 
                 ? await context.Coach.GradeAsync(exercise!, answer)
                 : LocalCoach.Grade(card, answer);
             var direction = context.IsReverseDirection ? ReviewDirection.Reverse : ReviewDirection.Standard;
-            await context.Repository.RecordReviewAsync(card, grade.IsCorrect, grade.Feedback, direction);
+            var isRetry = context.IsCurrentCardReviewed;
+            if (!isRetry)
+            {
+                await context.Repository.RecordReviewAsync(card, grade.IsCorrect, grade.Feedback, direction);
+                context.IsCurrentCardReviewed = true;
+                await context.RefreshStatisticsAsync();
+            }
             var directionNote = context.IsReverseDirection ? "Reverse direction — " : string.Empty;
             var fallbackNote = isDirectCardFallback
                 ? "The natural example was unavailable, so this direct-card answer was checked against the saved meanings.\n"
                 : string.Empty;
             context.FeedbackBox.Text = $"{fallbackNote}{(grade.IsCorrect ? "✓ Correct" : "Try again soon")} — {directionNote}{grade.Feedback}\nNatural answer: {grade.IdealAnswer}";
-            context.PracticeStatus.Text = context.IsReverseDirection
-                ? "Reverse-direction answer recorded. Choose Next for another card."
-                : grade.IsCorrect ? "Great work. Choose Next for another card." : "This card returns in about ten minutes. Choose Next for another card.";
-            await context.RefreshStatisticsAsync();
-            context.CurrentCard = null;
-            context.CurrentExercise = null;
-            context.CheckButton.IsEnabled = false;
+            context.PracticeStatus.Text = isRetry
+                ? "Practice retry checked. Your learning score still reflects the first attempt."
+                : "Answer recorded. You can revise and check again, or choose Next for another card.";
         }
         catch (GradingContextMismatchException exception)
         {

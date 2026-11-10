@@ -8,7 +8,7 @@ namespace LinguaLoop.Services;
 
 public interface IPracticeCoach
 {
-    Task<PracticeExercise> CreateExerciseAsync(Card card, IReadOnlyList<string> recentExamples);
+    Task<PracticeExercise> CreateExerciseAsync(Card card, IReadOnlyList<string> recentExamples, string? sourceLanguage = null);
     Task<GradingResult> GradeAsync(PracticeExercise exercise, string answer);
 }
 
@@ -255,9 +255,9 @@ public abstract class JsonPracticeCoach : IPracticeCoach
         additionalProperties = false
     };
 
-    public async Task<PracticeExercise> CreateExerciseAsync(Card card, IReadOnlyList<string> recentExamples)
+    public async Task<PracticeExercise> CreateExerciseAsync(Card card, IReadOnlyList<string> recentExamples, string? sourceLanguage = null)
     {
-        var sourceLanguage = Random.Shared.Next(2) == 0 ? "English" : "Ukrainian";
+        sourceLanguage ??= Random.Shared.Next(2) == 0 ? "English" : "Ukrainian";
         var targetLanguage = sourceLanguage == "English" ? "Ukrainian" : "English";
         var literalTargetLanguage = string.Equals(card.PromptLanguage, "English", StringComparison.OrdinalIgnoreCase)
             ? "Ukrainian"
@@ -297,6 +297,15 @@ public abstract class JsonPracticeCoach : IPracticeCoach
                 exampleContext,
                 previousExamples,
                 rejectedCandidates);
+            static string NormalizeExample(string text) =>
+                string.Concat(text.Where(char.IsLetterOrDigit)).ToUpperInvariant();
+            if (recentExamples.Any(previous =>
+                    NormalizeExample(previous) == NormalizeExample(candidate.SourceText) ||
+                    NormalizeExample(previous) == NormalizeExample(candidate.ReferenceTranslation)))
+            {
+                rejectedCandidates.Add($"Repeated example: {candidate.SourceText}. Change the situation and wording.");
+                continue;
+            }
             structurallyUsableFallback ??= candidate;
 
             SentenceValidation validation;
@@ -762,6 +771,10 @@ public abstract class JsonPracticeCoach : IPracticeCoach
                 Vocabulary phrase being tested JSON: {{vocabularyPhraseJson}}
                 Reference translation JSON: {{referenceJson}}
                 Learner answer JSON: {{answerJson}}
+
+                First locate the part of the learner answer that translates the tested vocabulary. Search the complete answer, allowing apostrophe variants (' / ’ / ʼ), grammatical inflections, and Ukrainian word order. A phrase can be present inside a longer sentence.
+                Example: for "muscle strain", an answer containing "розтягнення м'яза" or "розтягнення м’яза" conveys the tested meaning and must pass, even if its surrounding wording differs from the reference.
+                Before returning false or claiming the translation is absent, check that identified part again. Feedback must agree with the actual text and the isCorrect decision.
 
                 The learning objective is the vocabulary phrase, not the whole example sentence. Decide isCorrect based only on whether the learner conveys the meaning of the exact vocabulary phrase in this context in {{exercise.TargetLanguage}}, allowing natural equivalents and grammar variations. The learner may translate just the vocabulary phrase; do not require the rest of the example sentence. Missing subjects, actions, details, punctuation, or grammar outside that phrase must never turn an otherwise correct phrase translation into a wrong answer. Mark false only when the phrase is missing, materially mistranslated, used with the wrong sense, or the answer clearly does not attempt its meaning. Use the source sentence and full reference translation only to infer the phrase's contextual meaning. Do not introduce details or scenes absent from the source. Give brief constructive feedback in {{exercise.TargetLanguage}}; you may mention optional improvements separately, but they must not affect isCorrect. Provide a natural idealAnswer for the full example sentence.
                 In requestToken, copy the request token exactly. Never reuse feedback from an earlier request.

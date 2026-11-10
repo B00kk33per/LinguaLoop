@@ -19,6 +19,7 @@ public partial class MainWindow : Window, IWindowCommandContext
     private readonly PracticeReminderService _practiceReminder;
     private AppSettings _settings = new();
     private Card? _currentCard;
+    private bool _isCurrentCardReviewed;
     private PracticeExercise? _currentExercise;
     private IPracticeCoach? _aiCoach;
     private string? _aiLoadError;
@@ -39,6 +40,7 @@ public partial class MainWindow : Window, IWindowCommandContext
         DirectionSwitch.Command = new ReverseDirectionCommand(this, _logger, onError);
         DoneButton.Command = new DoneCommand(this, _logger, onError);
         CopySentenceButton.Command = new CopySentenceCommand(this, _logger, onError);
+        NewExampleButton.Command = new NewExampleCommand(this, _logger, onError);
         AddVocabularyButton.Command = new AddVocabularyCommand(this, _logger, onError);
         SaveVocabularyButton.Command = new SaveVocabularyCommand(this, _logger, onError);
         RemoveVocabularyButton.Command = new RemoveVocabularyCommand(this, _logger, onError);
@@ -77,6 +79,11 @@ public partial class MainWindow : Window, IWindowCommandContext
         {
             eventArgs.Cancel = true;
             Hide();
+            if (_isCurrentCardReviewed)
+            {
+                _currentCard = null;
+                _currentExercise = null;
+            }
         };
         _quizTimer.Tick += async (_, _) => await ShowScheduledQuizAsync();
     }
@@ -86,6 +93,7 @@ public partial class MainWindow : Window, IWindowCommandContext
     SettingsStore IWindowCommandContext.SettingsStore => _settingsStore;
     AppSettings IWindowCommandContext.Settings => _settings;
     Card? IWindowCommandContext.CurrentCard { get => _currentCard; set => _currentCard = value; }
+    bool IWindowCommandContext.IsCurrentCardReviewed { get => _isCurrentCardReviewed; set => _isCurrentCardReviewed = value; }
     PracticeExercise? IWindowCommandContext.CurrentExercise { get => _currentExercise; set => _currentExercise = value; }
     IPracticeCoach? IWindowCommandContext.Coach { get => _aiCoach; set => _aiCoach = value; }
     string? IWindowCommandContext.AiLoadError => _aiLoadError;
@@ -201,7 +209,8 @@ public partial class MainWindow : Window, IWindowCommandContext
         }
 
         _logger.Info($"Skipping practice card {card.Id} from the native notification.");
-        await _repository.RecordReviewAsync(card, false, "Skipped from system notification.", ReviewDirection.Standard);
+        if (!_isCurrentCardReviewed)
+            await _repository.RecordReviewAsync(card, false, "Skipped from system notification.", ReviewDirection.Standard);
         await RefreshStatisticsAsync();
         await LoadRandomCardAsync(card.Id);
     }
@@ -219,6 +228,7 @@ public partial class MainWindow : Window, IWindowCommandContext
     private async Task LoadCardAsync(Card? card)
     {
         _currentCard = card;
+        _isCurrentCardReviewed = false;
         _currentExercise = null;
         _aiLoadError = null;
         _useReverseDirection = false;
@@ -228,6 +238,7 @@ public partial class MainWindow : Window, IWindowCommandContext
         AnswerBox.Text = string.Empty;
         FeedbackBox.Text = string.Empty;
         CheckAnswerButton.IsEnabled = _currentCard is not null;
+        NewExampleButton.IsEnabled = _currentCard is not null && _aiCoach is not null;
         if (_currentCard is null)
         {
             PracticeStatus.Text = "No cards are due right now. Add a card or return when the tray reminds you.";
@@ -280,6 +291,7 @@ public partial class MainWindow : Window, IWindowCommandContext
         if (exercise is null)
             return;
 
+        HintButton.Content = "Hint";
         DisplayPromptText(
             exercise.SourceText,
             _useReverseDirection ? Array.Empty<WordHint>() : exercise.WordHints,
