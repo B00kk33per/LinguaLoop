@@ -11,7 +11,13 @@ public static class LocalCoach
 
         static string Normalize(string text) => string.Concat(text.Trim().ToLowerInvariant().Where(char.IsLetterOrDigit));
 
-        var correct = Normalize(answer) == Normalize(card.Translation);
+        var expectedAnswers = new[] { card.Translation }
+            .Concat(card.Synonyms)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(Normalize)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var correct = expectedAnswers.Contains(Normalize(answer), StringComparer.Ordinal);
         return correct
             ? new GradingResult(true, "Correct. Add an AI provider to receive contextual examples and richer feedback.", card.Translation)
             : new GradingResult(false, $"Not quite. A saved answer is: {card.Translation}", card.Translation);

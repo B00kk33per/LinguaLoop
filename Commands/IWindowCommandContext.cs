@@ -47,4 +47,5 @@ public interface IWindowCommandContext
     void RestartQuizTimer();
     string DefaultModelForSelectedProvider();
     string GetSettingsStatus();
+    public Button CheckButton { get; }
 }

@@ -149,7 +149,7 @@ public partial class MainWindow : Window, IWindowCommandContext
         ModelBox.Text = _settings.Model;
         CloudflareAccountIdBox.Text = _settings.CloudflareAccountId;
         IntervalBox.Value = _settings.QuizIntervalMinutes;
-        _aiCoach = PracticeCoachFactory.Create(_settings);
+        _aiCoach = PracticeCoachFactory.Create(_settings, _logger);
         SettingsStatus.Text = GetSettingsStatus();
         RestartQuizTimer();
         await RefreshVocabularyAsync();
@@ -224,8 +224,10 @@ public partial class MainWindow : Window, IWindowCommandContext
         _useReverseDirection = false;
         DirectionSwitch.IsChecked = false;
         HintPanel.IsVisible = false;
+        HintButton.Content = "Hint";
         AnswerBox.Text = string.Empty;
         FeedbackBox.Text = string.Empty;
+        CheckAnswerButton.IsEnabled = _currentCard is not null;
         if (_currentCard is null)
         {
             PracticeStatus.Text = "No cards are due right now. Add a card or return when the tray reminds you.";
@@ -245,8 +247,10 @@ public partial class MainWindow : Window, IWindowCommandContext
                 await _repository.SaveLexicalMetadataAsync(
                     _currentCard,
                     _currentExercise.LiteralTranslation,
-                    _currentExercise.Synonyms);
+                    _currentExercise.Synonyms,
+                    _currentExercise.SemanticProfile);
                 UpdateExerciseDisplay();
+                HintButton.Content = "Hint";
                 AnswerBox.Focus();
                 return;
             }
@@ -254,7 +258,7 @@ public partial class MainWindow : Window, IWindowCommandContext
             {
                 _logger.Error("Could not prepare the next practice exercise", exception);
                 _aiLoadError = exception.Message;
-                PracticeStatus.Text = $"The AI coach is unavailable. Using the saved answer instead. ({exception.Message})";
+                _logger.Info("Using the direct vocabulary-card fallback after natural example generation failed.");
             }
             finally
             {
@@ -263,7 +267,10 @@ public partial class MainWindow : Window, IWindowCommandContext
         }
 
         DisplayPromptText(_currentCard.Prompt);
-        PracticeStatus.Text = $"Translate from {_currentCard.PromptLanguage}. Add an AI provider in Settings for contextual examples.";
+        HintButton.Content = string.IsNullOrWhiteSpace(_currentCard.Translation) ? "Hint" : "Show answer";
+        PracticeStatus.Text = _aiCoach is null
+            ? $"Translate from {_currentCard.PromptLanguage}. Add an AI provider in Settings for contextual examples."
+            : $"A direct-card review is ready. Choose Show answer to reveal the saved translation.";
         AnswerBox.Focus();
     }
 
@@ -293,7 +300,8 @@ public partial class MainWindow : Window, IWindowCommandContext
             _currentExercise.LiteralTranslation,
             _currentExercise.WordHints,
             _currentExercise.VocabularyMatchText,
-            _currentExercise.Synonyms);
+            _currentExercise.Synonyms,
+            _currentExercise.SemanticProfile);
     }
 
     private void DisplayPromptText(
@@ -502,4 +510,5 @@ public partial class MainWindow : Window, IWindowCommandContext
             ? "Add a Gemini API key to enable contextual examples and AI assessment. Exact matching remains available without it."
             : "Add a Cloudflare Account ID and Workers AI API token to enable Gemma 4 examples and AI assessment. Exact matching remains available without them.";
     }
+    public Button CheckButton { get => CheckAnswerButton; }
 }

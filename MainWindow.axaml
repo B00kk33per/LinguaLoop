@@ -30,7 +30,7 @@
               <StackPanel Spacing="3">
                 <TextBlock Text="Vocabulary" FontWeight="SemiBold" />
                 <TextBlock x:Name="HintVocabularyText" TextWrapping="Wrap" />
-                <TextBlock Text="Literal translation" FontWeight="SemiBold" />
+                <TextBlock Text="Saved translation / answer" FontWeight="SemiBold" />
                 <TextBlock x:Name="HintLiteralText" TextWrapping="Wrap" />
               </StackPanel>
             </Border>

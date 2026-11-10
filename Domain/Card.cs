@@ -6,6 +6,7 @@ public sealed class Card
     public required string Prompt { get; init; }
     public string? Translation { get; init; }
     public IReadOnlyList<string> Synonyms { get; init; } = [];
+    public VocabularyProfile? SemanticProfile { get; init; }
     public required string PromptLanguage { get; init; }
     public DateTime NextReviewAt { get; init; }
     public int IntervalDays { get; init; }
@@ -39,7 +40,16 @@ public sealed record PracticeExercise(
     string LiteralTranslation,
     IReadOnlyList<WordHint> WordHints,
     string VocabularyMatchText,
-    IReadOnlyList<string> Synonyms);
+    IReadOnlyList<string> Synonyms,
+    VocabularyProfile SemanticProfile);
+
+public sealed record VocabularyProfile(
+    string Definition,
+    string IntendedSense,
+    string PartOfSpeech,
+    IReadOnlyList<string> CommonCollocations,
+    IReadOnlyList<string> UsageNotes,
+    IReadOnlyList<string> AvoidedUsages);
 
 public sealed record WordHint(string SourceText, IReadOnlyList<string> Synonyms);
 

@@ -25,6 +25,7 @@ public sealed class VocabularyRepository
                 prompt TEXT NOT NULL,
                 translation TEXT NULL,
                 synonyms_json TEXT NULL,
+                semantic_profile_json TEXT NULL,
                 prompt_language TEXT NOT NULL,
                 next_review_at TEXT NOT NULL,
                 interval_days INTEGER NOT NULL DEFAULT 0,
@@ -70,16 +71,28 @@ public sealed class VocabularyRepository
         var cardColumnCheck = connection.CreateCommand();
         cardColumnCheck.CommandText = "PRAGMA table_info(cards);";
         var hasSynonymsColumn = false;
+        var hasSemanticProfileColumn = false;
         await using (var columns = await cardColumnCheck.ExecuteReaderAsync())
         {
             while (await columns.ReadAsync())
-                hasSynonymsColumn |= string.Equals(columns.GetString(1), "synonyms_json", StringComparison.OrdinalIgnoreCase);
+            {
+                var columnName = columns.GetString(1);
+                hasSynonymsColumn |= string.Equals(columnName, "synonyms_json", StringComparison.OrdinalIgnoreCase);
+                hasSemanticProfileColumn |= string.Equals(columnName, "semantic_profile_json", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         if (!hasSynonymsColumn)
         {
             var migration = connection.CreateCommand();
             migration.CommandText = "ALTER TABLE cards ADD COLUMN synonyms_json TEXT NULL;";
+            await migration.ExecuteNonQueryAsync();
+        }
+
+        if (!hasSemanticProfileColumn)
+        {
+            var migration = connection.CreateCommand();
+            migration.CommandText = "ALTER TABLE cards ADD COLUMN semantic_profile_json TEXT NULL;";
             await migration.ExecuteNonQueryAsync();
         }
     }
@@ -100,7 +113,7 @@ public sealed class VocabularyRepository
     {
         await using var connection = await OpenAsync();
         var command = connection.CreateCommand();
-        command.CommandText = "UPDATE cards SET prompt = $prompt, translation = $translation, synonyms_json = NULL, prompt_language = $language WHERE id = $id;";
+        command.CommandText = "UPDATE cards SET prompt = $prompt, translation = $translation, synonyms_json = NULL, semantic_profile_json = NULL, prompt_language = $language WHERE id = $id;";
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$prompt", prompt.Trim());
         command.Parameters.AddWithValue("$translation", string.IsNullOrWhiteSpace(translation) ? DBNull.Value : translation.Trim());
@@ -125,7 +138,11 @@ public sealed class VocabularyRepository
         transaction.Commit();
     }
 
-    public async Task SaveLexicalMetadataAsync(Card card, string literalTranslation, IReadOnlyList<string> synonyms)
+    public async Task SaveLexicalMetadataAsync(
+        Card card,
+        string literalTranslation,
+        IReadOnlyList<string> synonyms,
+        VocabularyProfile semanticProfile)
     {
         await using var connection = await OpenAsync();
         var command = connection.CreateCommand();
@@ -136,11 +153,13 @@ public sealed class VocabularyRepository
                     THEN $translation
                     ELSE translation
                 END,
-                synonyms_json = $synonyms
+                synonyms_json = $synonyms,
+                semantic_profile_json = $semanticProfile
             WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$translation", literalTranslation.Trim());
         command.Parameters.AddWithValue("$synonyms", JsonSerializer.Serialize(synonyms));
+        command.Parameters.AddWithValue("$semanticProfile", JsonSerializer.Serialize(semanticProfile));
         command.Parameters.AddWithValue("$id", card.Id);
         command.Parameters.AddWithValue("$prompt", card.Prompt);
         await command.ExecuteNonQueryAsync();
@@ -200,7 +219,7 @@ public sealed class VocabularyRepository
         await using var connection = await OpenAsync();
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json
+            SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json, semantic_profile_json
             FROM cards
             WHERE next_review_at <= $now
             ORDER BY CASE WHEN interval_days = 0 THEN 0 ELSE 1 END, next_review_at ASC
@@ -216,8 +235,8 @@ public sealed class VocabularyRepository
         await using var connection = await OpenAsync();
         var command = connection.CreateCommand();
         command.CommandText = excludeCardId is null
-            ? "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json FROM cards ORDER BY RANDOM() LIMIT 1;"
-            : "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json FROM cards WHERE id <> $excludedId ORDER BY RANDOM() LIMIT 1;";
+            ? "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json, semantic_profile_json FROM cards ORDER BY RANDOM() LIMIT 1;"
+            : "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json, semantic_profile_json FROM cards WHERE id <> $excludedId ORDER BY RANDOM() LIMIT 1;";
         if (excludeCardId is not null)
             command.Parameters.AddWithValue("$excludedId", excludeCardId.Value);
 
@@ -230,7 +249,7 @@ public sealed class VocabularyRepository
         var cards = new List<Card>();
         await using var connection = await OpenAsync();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json FROM cards ORDER BY next_review_at ASC, prompt COLLATE NOCASE;";
+        command.CommandText = "SELECT id, prompt, translation, prompt_language, next_review_at, interval_days, ease_factor, correct_count, wrong_count, synonyms_json, semantic_profile_json FROM cards ORDER BY next_review_at ASC, prompt COLLATE NOCASE;";
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync()) cards.Add(ReadCard(reader));
         return cards;
@@ -313,7 +332,7 @@ public sealed class VocabularyRepository
         Id = reader.GetInt64(0), Prompt = reader.GetString(1), Translation = reader.IsDBNull(2) ? null : reader.GetString(2),
         PromptLanguage = reader.GetString(3), NextReviewAt = DateTime.Parse(reader.GetString(4)), IntervalDays = reader.GetInt32(5),
         EaseFactor = reader.GetDouble(6), CorrectCount = reader.GetInt32(7), WrongCount = reader.GetInt32(8),
-        Synonyms = ReadSynonyms(reader)
+        Synonyms = ReadSynonyms(reader), SemanticProfile = ReadSemanticProfile(reader)
     };
 
     private static IReadOnlyList<string> ReadSynonyms(SqliteDataReader reader)
@@ -327,6 +346,20 @@ public sealed class VocabularyRepository
         catch (JsonException)
         {
             return [];
+        }
+    }
+
+    private static VocabularyProfile? ReadSemanticProfile(SqliteDataReader reader)
+    {
+        if (reader.FieldCount <= 10 || reader.IsDBNull(10)) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<VocabularyProfile>(reader.GetString(10));
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 }

@@ -12,31 +12,29 @@ public sealed class CheckAnswerCommand(IWindowCommandContext context, AppLogger 
         if (card is null) { context.PracticeStatus.Text = "There is no active card to check."; return; }
         var answer = context.AnswerBox.Text?.Trim();
         if (string.IsNullOrWhiteSpace(answer)) { context.FeedbackBox.Text = "Write an answer first, or choose Next."; return; }
-        if (context.Coach is not null && context.CurrentExercise is null && !string.IsNullOrWhiteSpace(context.AiLoadError))
-        {
-            context.PracticeStatus.Text = "The AI coach could not prepare this exercise. Your answer was not recorded.";
-            context.FeedbackBox.Text = context.AiLoadError;
-            return;
-        }
-
         try
         {
             context.PracticeStatus.Text = "Checking your answer…";
             context.SetBusy(true, "Checking your answer…");
             var exercise = context.CurrentExerciseForDirection();
+            var isDirectCardFallback = context.Coach is not null && context.CurrentExercise is null;
             var grade = context.CurrentExercise is not null && context.Coach is not null
                 ? await context.Coach.GradeAsync(exercise!, answer)
                 : LocalCoach.Grade(card, answer);
             var direction = context.IsReverseDirection ? ReviewDirection.Reverse : ReviewDirection.Standard;
             await context.Repository.RecordReviewAsync(card, grade.IsCorrect, grade.Feedback, direction);
             var directionNote = context.IsReverseDirection ? "Reverse direction — " : string.Empty;
-            context.FeedbackBox.Text = $"{(grade.IsCorrect ? "✓ Correct" : "Try again soon")} — {directionNote}{grade.Feedback}\nNatural answer: {grade.IdealAnswer}";
+            var fallbackNote = isDirectCardFallback
+                ? "The natural example was unavailable, so this direct-card answer was checked against the saved meanings.\n"
+                : string.Empty;
+            context.FeedbackBox.Text = $"{fallbackNote}{(grade.IsCorrect ? "✓ Correct" : "Try again soon")} — {directionNote}{grade.Feedback}\nNatural answer: {grade.IdealAnswer}";
             context.PracticeStatus.Text = context.IsReverseDirection
-                ? "Recorded as a reverse-direction answer with a lighter effect on your learning score."
-                : grade.IsCorrect ? "Great work. This card will appear less often." : "This card returns in about ten minutes.";
+                ? "Reverse-direction answer recorded. Choose Next for another card."
+                : grade.IsCorrect ? "Great work. Choose Next for another card." : "This card returns in about ten minutes. Choose Next for another card.";
             await context.RefreshStatisticsAsync();
             context.CurrentCard = null;
             context.CurrentExercise = null;
+            context.CheckButton.IsEnabled = false;
         }
         catch (GradingContextMismatchException exception)
         {
